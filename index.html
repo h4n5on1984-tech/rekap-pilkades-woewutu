@@ -14,6 +14,9 @@
   <section class="auth-forms"><h2>Masuk aplikasi</h2><p class="section-note">Gunakan akun yang dibuat oleh admin. Pendaftaran akun publik tidak tersedia.</p>
    <div id="loginAlert"></div>
    <form id="loginForm"><div class="field"><label for="email">Email akun</label><input type="email" id="email" autocomplete="username" required placeholder="petugas@email.com"></div><div class="field"><label for="password">Kata sandi</label><input type="password" id="password" autocomplete="current-password" required placeholder="Kata sandi akun"></div><button class="btn primary" id="loginBtn" type="submit" style="width:100%;margin-top:5px">Masuk</button></form>
+   
+<button type="button" id="forgotPasswordBtn" class="btn" style="width:100%;margin-top:10px">Lupa kata sandi?</button>
+
    <div class="divider"></div>
    <div class="config-box"><details id="configDetails"><summary>Pengaturan koneksi database</summary><p class="section-note">Isi URL proyek dan publishable/anon key dari Supabase. Key ini boleh ada di browser hanya karena hak akses dibatasi oleh RLS. Jangan pernah masukkan service_role/secret key.</p><div class="field"><label for="supabaseUrl">Supabase Project URL</label><input id="supabaseUrl" class="config-input" placeholder="https://xxxx.supabase.co" autocomplete="off"></div><div class="field"><label for="supabaseKey">Publishable key / anon key</label><input id="supabaseKey" class="config-input" placeholder="sb_publishable_… atau eyJ…" autocomplete="off"></div><button id="saveConfig" class="btn" type="button">Simpan pengaturan di perangkat ini</button><span class="section-note" id="configState"></span></details></div>
    <p class="section-note">Jika database belum dibuat, ikuti file <b>PANDUAN.md</b> di paket unduhan. Aplikasi ini belum terhubung ke database sampai Bapak mengisi konfigurasi proyek sendiri.</p>
@@ -41,7 +44,118 @@
  function showAuth(message='',type='error') { $('authScreen').classList.remove('hidden'); $('appScreen').classList.add('hidden'); if(message)setAlert('loginAlert',message,type); }
  function showApp(){ $('authScreen').classList.add('hidden'); $('appScreen').classList.remove('hidden'); $('userInfo').textContent=state.profile?.full_name || state.user?.email || ''; $('roleBadge').textContent=isAdmin()?'ADMIN':'TIM: '+(state.dusun.find(d=>d.id===assignedDusun())?.name||'DUSUN'); document.querySelectorAll('.admin-only').forEach(x=>x.classList.toggle('hidden',!isAdmin())); }
  function clientFromConfig(){const c=cfg(); if(!c.url||!c.key) return null; if(!window.supabase?.createClient) throw new Error('Pustaka koneksi gagal dimuat. Periksa internet dan muat ulang halaman.'); return window.supabase.createClient(c.url,c.key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});}
- async function connect(){const c=cfg(); if(!c.url||!c.key) return showAuth('Aplikasi belum dikonfigurasi. Isi URL dan public key Supabase untuk memulai.','info'); try{state.client=clientFromConfig(); const {data:{session},error}=await state.client.auth.getSession(); if(error) throw error; if(session) await startSession(session.user); else showAuth();}catch(e){showAuth(e.message||'Tidak dapat menghubungkan Supabase.');}}
+ 
+function showPasswordResetForm(){
+  const auth = $('authScreen');
+  const app = $('appScreen');
+
+  app.classList.add('hidden');
+  auth.classList.remove('hidden');
+
+  auth.innerHTML = `
+    <div style="max-width:420px;margin:30px auto;padding:24px;background:#fff;border-radius:12px">
+      <h2>Buat Kata Sandi Baru</h2>
+      <p>Masukkan kata sandi baru untuk akun Anda.</p>
+      <form id="newPasswordForm">
+        <label for="newPassword">Kata sandi baru</label>
+        <input id="newPassword" type="password" minlength="8" required
+          autocomplete="new-password"
+          style="display:block;width:100%;padding:12px;margin:8px 0 16px;box-sizing:border-box">
+
+        <label for="confirmPassword">Ulangi kata sandi baru</label>
+        <input id="confirmPassword" type="password" minlength="8" required
+          autocomplete="new-password"
+          style="display:block;width:100%;padding:12px;margin:8px 0 16px;box-sizing:border-box">
+
+        <p id="resetMessage"></p>
+        <button type="submit" style="width:100%;padding:12px">Simpan Kata Sandi</button>
+      </form>
+    </div>`;
+
+  $('newPasswordForm').addEventListener('submit', async e => {
+    e.preventDefault();
+
+    const password = $('newPassword').value;
+    const confirm = $('confirmPassword').value;
+    const message = $('resetMessage');
+
+    if (password.length < 8) {
+      message.textContent = 'Kata sandi minimal 8 karakter.';
+      return;
+    }
+
+    if (password !== confirm) {
+      message.textContent = 'Kedua kata sandi belum sama.';
+      return;
+    }
+
+    try {
+      const { error } = await state.client.auth.updateUser({
+        password: password
+      });
+
+      if (error) throw error;
+
+      message.textContent = 'Kata sandi berhasil diperbarui. Silakan kembali ke halaman login.';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = 'Kembali ke Login';
+      button.style.cssText = 'width:100%;padding:12px;margin-top:12px';
+      button.onclick = () => {
+        window.location.href = 'https://h4n5on1984-tech.github.io/rekap-pilkades-woewutu/';
+      };
+      $('newPasswordForm').appendChild(button);
+    } catch (err) {
+      message.textContent = err.message || 'Gagal memperbarui kata sandi.';
+    }
+  });
+}
+
+ 
+async function connect(){
+  const c = cfg();
+
+  if(!c.url || !c.key) {
+    return showAuth(
+      'Aplikasi belum dikonfigurasi. Isi URL dan public key Supabase untuk memulai.',
+      'info'
+    );
+  }
+
+  try {
+    state.client = clientFromConfig();
+
+    const recoveryFromUrl =
+      window.location.hash.includes('type=recovery') ||
+      new URLSearchParams(window.location.search).get('type') === 'recovery';
+
+    if (recoveryFromUrl) {
+      const { data: { session }, error } =
+        await state.client.auth.getSession();
+
+      if (error) throw error;
+
+      if (session) {
+        showPasswordResetForm();
+        return;
+      }
+    }
+
+    const { data: { session }, error } =
+      await state.client.auth.getSession();
+
+    if (error) throw error;
+
+    if (session) {
+      await startSession(session.user);
+    } else {
+      showAuth();
+    }
+  } catch (e) {
+    showAuth(e.message || 'Tidak dapat menghubungkan Supabase.');
+  }
+}
+
  $('saveConfig').addEventListener('click',async()=>{let url=$('supabaseUrl').value.trim().replace(/\/$/,'');let key=$('supabaseKey').value.trim();if(!/^https:\/\/[a-zA-Z0-9-]+\.supabase\.co$/.test(url)){setAlert('loginAlert','URL harus berbentuk https://xxxx.supabase.co.','error');return;}if(!key){setAlert('loginAlert','Masukkan publishable key atau anon key.','error');return;}localStorage.setItem('woewutu_sb_url',url);localStorage.setItem('woewutu_sb_key',key);$('configState').textContent=' Pengaturan tersimpan di perangkat ini.';setAlert('loginAlert','Konfigurasi tersimpan. Silakan masuk dengan akun Supabase yang sudah dibuat admin.','ok');});
  const c0=cfg(); $('supabaseUrl').value=c0.url; $('supabaseKey').value=c0.key;
  $('loginForm').addEventListener('submit',async e=>{e.preventDefault();$('loginBtn').disabled=true;$('loginBtn').textContent='Memeriksa…';try{state.client=clientFromConfig();if(!state.client)throw new Error('Isi konfigurasi database dulu.');const {data,error}=await state.client.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});if(error)throw error;await startSession(data.user);}catch(err){setAlert('loginAlert',err.message||'Gagal masuk.','error');}finally{$('loginBtn').disabled=false;$('loginBtn').textContent='Masuk';}});
@@ -207,6 +321,36 @@ function renderSupporters(){
  function safeRefresh(){if(!state.profile||document.hidden)return;loadAll().then(()=>{const a=document.activeElement;const typing=$('mainContent').contains(a)&&['INPUT','TEXTAREA','SELECT'].includes(a.tagName);if(!typing)render();}).catch(()=>{});}
  window.addEventListener('online',safeRefresh);
  setInterval(safeRefresh,20000);
+  
+$('forgotPasswordBtn').addEventListener('click', async () => {
+  const email = $('email').value.trim();
+
+  if (!email) {
+    setAlert('loginAlert', 'Masukkan email akun Anda terlebih dahulu.', 'error');
+    $('email').focus();
+    return;
+  }
+
+  try {
+    const client = clientFromConfig();
+    if (!client) throw new Error('Konfigurasi database belum tersedia.');
+
+    const { error } = await client.auth.resetPasswordForEmail(email, {
+      redirectTo: 'https://h4n5on1984-tech.github.io/rekap-pilkades-woewutu/'
+    });
+
+    if (error) throw error;
+
+    setAlert(
+      'loginAlert',
+      'Permintaan pemulihan diproses. Periksa Gmail dan folder Spam.',
+      'info'
+    );
+  } catch (err) {
+    setAlert('loginAlert', err.message || 'Gagal meminta pemulihan kata sandi.', 'error');
+  }
+});
+
  connect();
 })();
 </script>
